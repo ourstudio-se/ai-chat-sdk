@@ -91,6 +91,6 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.MaxMessageLength == 0 {
-		c.MaxMessageLength = 100
+		c.MaxMessageLength = 1000
 	}
 }

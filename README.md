@@ -15,16 +15,18 @@ package main
 
 import (
     "context"
-    "log/slog"
     "net/http"
     "os"
 
     aichat "github.com/ourstudio-se/ai-chat-sdk"
+    openai "github.com/sashabaranov/go-openai"
 )
 
 func main() {
+    openaiClient := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
+
     sdk, _ := aichat.New(aichat.Config{
-        OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+        OpenAIClient: openaiClient,
         Experts: map[aichat.ExpertType]aichat.Expert{
             "general": {
                 Name:        "General Expert",
@@ -34,7 +36,8 @@ func main() {
                 },
             },
         },
-        DefaultExpert: "general",
+        DefaultExpert:  "general",
+        AllowedOrigins: []string{"*"}, // Configure appropriately for production
     })
 
     http.ListenAndServe(":3001", sdk.HTTPHandler())
@@ -164,35 +167,17 @@ store := aichat.ConversationStore{
 }
 ```
 
-### Step 4: Add Domain Glossary (Optional)
-
-For accurate translations in your domain, provide a glossary:
-
-```go
-glossary := map[string]aichat.GlossaryTerms{
-    "shopping cart": {
-        English: "shopping cart",
-        Swedish: "kundvagn",
-        German:  "Warenkorb",
-        French:  "panier",
-    },
-    "checkout": {
-        English: "checkout",
-        Swedish: "kassa",
-        German:  "Kasse",
-        French:  "caisse",
-    },
-}
-```
-
-### Step 5: Create the SDK
+### Step 4: Create the SDK
 
 Put it all together:
 
 ```go
+// Create OpenAI client
+openaiClient := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
+
 sdk, err := aichat.New(aichat.Config{
     // Required
-    OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+    OpenAIClient: openaiClient,
 
     // Expert definitions with handlers
     Experts: experts,
@@ -203,9 +188,6 @@ sdk, err := aichat.New(aichat.Config{
 
     // Optional: Custom storage
     Storage: store,
-
-    // Optional: Domain glossary
-    Glossary: glossary,
 
     // Optional: Custom logger
     Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -220,7 +202,7 @@ if err != nil {
 }
 ```
 
-### Step 6: Start the Server
+### Step 5: Start the Server
 
 **Option A: Use the built-in HTTP handler**
 ```go
@@ -259,6 +241,7 @@ import (
     "os"
 
     aichat "github.com/ourstudio-se/ai-chat-sdk"
+    openai "github.com/sashabaranov/go-openai"
 )
 
 // Simulated product database
@@ -289,8 +272,11 @@ func main() {
         Level: slog.LevelDebug,
     }))
 
+    // Create OpenAI client
+    openaiClient := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
+
     sdk, err := aichat.New(aichat.Config{
-        OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+        OpenAIClient: openaiClient,
         Logger:       logger,
 
         // Define experts with their metadata and handlers in one place
@@ -309,14 +295,6 @@ func main() {
 
         DefaultExpert:    "support",
         DefaultReasoning: "Routing to support for general assistance",
-
-        Glossary: map[string]aichat.GlossaryTerms{
-            "battery life": {
-                English: "battery life",
-                Swedish: "batteritid",
-                German:  "Akkulaufzeit",
-            },
-        },
 
         AllowedOrigins: []string{"*"},
     })
