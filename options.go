@@ -38,9 +38,6 @@ type Config struct {
 	// TranslatorSystemPrompt is a custom system prompt for the translator (optional).
 	TranslatorSystemPrompt string
 
-	// Glossary contains domain-specific term translations (optional).
-	Glossary map[string]GlossaryTerms
-
 	// AllowedOrigins for CORS. Must be explicitly configured unless DevMode is enabled.
 	AllowedOrigins []string
 
@@ -56,16 +53,6 @@ type Config struct {
 
 	// MaxMessageLength is the maximum length of a message in characters (defaults to 10000).
 	MaxMessageLength int
-}
-
-// GlossaryTerms contains translations for a term in different languages.
-type GlossaryTerms struct {
-	English   string
-	Swedish   string
-	German    string
-	Norwegian string
-	Danish    string
-	French    string
 }
 
 // DefaultRouterSystemPromptTemplate is the default template for the router.
@@ -104,6 +91,6 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.MaxMessageLength == 0 {
-		c.MaxMessageLength = 10000
+		c.MaxMessageLength = 100
 	}
 }

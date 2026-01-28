@@ -49,7 +49,7 @@ func New(config Config) (*SDK, error) {
 	)
 
 	// Create formatter
-	formatResponseFn := newFormatter(openaiClient.Chat, logger, config.FormatterSystemPrompt, config.Glossary)
+	formatResponseFn := newFormatter(openaiClient.Chat, logger, config.FormatterSystemPrompt)
 
 	// Create dispatcher
 	dispatchQuestionFn := NewDispatcher(

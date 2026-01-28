@@ -63,14 +63,6 @@ func main() {
 		DefaultExpert:    "support",
 		DefaultReasoning: "Routing to support for general assistance",
 
-		Glossary: map[string]aichat.GlossaryTerms{
-			"battery life": {
-				English: "battery life",
-				Swedish: "batteritid",
-				German:  "Akkulaufzeit",
-			},
-		},
-
 		AllowedOrigins: []string{"*"},
 	})
 	if err != nil {

@@ -7,7 +7,7 @@ import (
 )
 
 // newFormatter creates a formatting function.
-func newFormatter(chat ChatFn, logger *slog.Logger, customSystemPrompt string, glossary map[string]GlossaryTerms) FormatResponseFn {
+func newFormatter(chat ChatFn, logger *slog.Logger, customSystemPrompt string) FormatResponseFn {
 	return func(ctx context.Context, req FormatRequest) (*FormatResponse, error) {
 		if req.DetectedLanguage == "en" || req.Answer == "" {
 			return &FormatResponse{
@@ -16,8 +16,7 @@ func newFormatter(chat ChatFn, logger *slog.Logger, customSystemPrompt string, g
 			}, nil
 		}
 
-		glossaryPrompt := formatGlossaryForPrompt(glossary, req.DetectedLanguage)
-		systemPrompt := buildFormatterSystemPrompt(req.DetectedLanguage, glossaryPrompt, customSystemPrompt)
+		systemPrompt := buildFormatterSystemPrompt(req.DetectedLanguage, customSystemPrompt)
 
 		userPrompt := fmt.Sprintf(`Original question: "%s"
 
@@ -27,8 +26,7 @@ Please translate this answer to %s while maintaining:
 - A friendly, helpful tone
 - Technical accuracy
 - Natural, conversational language
-- Customer-friendly phrasing
-- IMPORTANT: Use the domain-specific terminology provided in the system prompt`,
+- Customer-friendly phrasing`,
 			req.OriginalQuestion,
 			req.Answer,
 			req.DetectedLanguage,
@@ -46,7 +44,6 @@ Please translate this answer to %s while maintaining:
 		logger.Debug("response formatted",
 			slog.String("language", req.DetectedLanguage),
 			slog.String("expert_type", string(req.ExpertType)),
-			slog.Bool("has_glossary", len(glossary) > 0),
 			slog.Int("answer_length", len(translated)),
 		)
 
@@ -57,9 +54,9 @@ Please translate this answer to %s while maintaining:
 	}
 }
 
-func buildFormatterSystemPrompt(language string, glossaryPrompt string, customSystemPrompt string) string {
+func buildFormatterSystemPrompt(language string, customSystemPrompt string) string {
 	if customSystemPrompt != "" {
-		return customSystemPrompt + glossaryPrompt
+		return customSystemPrompt
 	}
 
 	if language == "sv" {
@@ -76,7 +73,7 @@ Tone of voice:
 - Confident but not arrogant
 - Helpful and informative
 - Human and approachable
-- Focus on practical benefits` + glossaryPrompt
+- Focus on practical benefits`
 	}
 
 	return fmt.Sprintf(`You are a helpful assistant translating answers for customers.
@@ -92,38 +89,5 @@ Tone of voice:
 - Confident but not arrogant
 - Helpful and informative
 - Human and approachable
-- Focus on practical benefits`, language) + glossaryPrompt
-}
-
-func formatGlossaryForPrompt(glossary map[string]GlossaryTerms, targetLanguage string) string {
-	if glossary == nil || len(glossary) == 0 {
-		return ""
-	}
-
-	result := "\n\nDomain-specific terminology (use these translations):\n"
-	for term, translations := range glossary {
-		translation := getTranslationForLanguage(translations, targetLanguage)
-		if translation != "" && translation != translations.English {
-			result += "- " + term + " → " + translation + "\n"
-		}
-	}
-
-	return result
-}
-
-func getTranslationForLanguage(terms GlossaryTerms, languageCode string) string {
-	switch languageCode {
-	case "sv":
-		return terms.Swedish
-	case "de":
-		return terms.German
-	case "no", "nb", "nn":
-		return terms.Norwegian
-	case "da":
-		return terms.Danish
-	case "fr":
-		return terms.French
-	default:
-		return terms.English
-	}
+- Focus on practical benefits`, language)
 }
