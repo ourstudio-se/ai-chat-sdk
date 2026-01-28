@@ -51,7 +51,7 @@ type Config struct {
 	// MaxRequestBodySize is the maximum size of a request body in bytes (defaults to 1MB).
 	MaxRequestBodySize int64
 
-	// MaxMessageLength is the maximum length of a message in characters (defaults to 10000).
+	// MaxMessageLength is the maximum length of a message in characters (defaults to 1000).
 	MaxMessageLength int
 }
 
