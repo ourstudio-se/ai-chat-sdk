@@ -18,21 +18,22 @@ type SDK struct {
 func New(config Config) (*SDK, error) {
 	config.applyDefaults()
 
-	if config.OpenAIAPIKey == "" {
-		return nil, ErrOpenAIAPIKeyRequired
+	if config.OpenAIClient == nil {
+		return nil, errors.New("OpenAIClient is required")
 	}
 
 	if len(config.Experts) == 0 {
 		return nil, errors.New("at least one expert must be configured")
 	}
 
+	if len(config.AllowedOrigins) == 0 {
+		return nil, errors.New("AllowedOrigins must be configured (or enable DevMode)")
+	}
+
 	logger := config.Logger
 
-	// Create OpenAI client
-	openaiClient, err := newOpenAIClient(config.OpenAIAPIKey, logger)
-	if err != nil {
-		return nil, errors.New("failed to create OpenAI client: " + err.Error())
-	}
+	// Wrap OpenAI client with internal API
+	openaiClient := newInternalOpenAIClient(config.OpenAIClient, logger)
 
 	// Create translator
 	translateFn := newTranslator(openaiClient.ChatJSON, logger, config.TranslatorSystemPrompt)
@@ -48,7 +49,7 @@ func New(config Config) (*SDK, error) {
 	)
 
 	// Create formatter
-	formatResponseFn := newFormatter(openaiClient.Chat, logger, config.FormatterSystemPrompt, config.Glossary)
+	formatResponseFn := newFormatter(openaiClient.Chat, logger, config.FormatterSystemPrompt)
 
 	// Create dispatcher
 	dispatchQuestionFn := NewDispatcher(
@@ -75,12 +76,14 @@ func New(config Config) (*SDK, error) {
 
 	// Create HTTP handlers
 	healthHandler := newHealthHandler()
-	chatHandler := newChatHandler(processChatFn, logger)
-	chatStreamHandler := newChatStreamHandler(processChatFn, logger)
+	chatHandler := newChatHandler(processChatFn, config.MaxMessageLength, logger)
+	chatStreamHandler := newChatStreamHandler(processChatFn, config.MaxMessageLength, logger)
 
 	// Create HTTP router
 	httpHandler := newHTTPRouter(
 		config.AllowedOrigins,
+		config.RequestTimeout,
+		config.MaxRequestBodySize,
 		logger,
 		healthHandler,
 		chatHandler,

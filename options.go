@@ -2,12 +2,15 @@ package aichat
 
 import (
 	"log/slog"
+	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // Config holds SDK configuration.
 type Config struct {
-	// OpenAIAPIKey is the API key for OpenAI.
-	OpenAIAPIKey string
+	// OpenAIClient is the OpenAI client to use.
+	OpenAIClient *openai.Client
 
 	// Logger is the structured logger to use. If nil, a default logger is used.
 	Logger *slog.Logger
@@ -35,21 +38,21 @@ type Config struct {
 	// TranslatorSystemPrompt is a custom system prompt for the translator (optional).
 	TranslatorSystemPrompt string
 
-	// Glossary contains domain-specific term translations (optional).
-	Glossary map[string]GlossaryTerms
-
-	// AllowedOrigins for CORS (optional, defaults to ["*"]).
+	// AllowedOrigins for CORS. Must be explicitly configured unless DevMode is enabled.
 	AllowedOrigins []string
-}
 
-// GlossaryTerms contains translations for a term in different languages.
-type GlossaryTerms struct {
-	English   string
-	Swedish   string
-	German    string
-	Norwegian string
-	Danish    string
-	French    string
+	// DevMode enables permissive settings for development (e.g., allows all CORS origins).
+	// IMPORTANT: Do not enable in production.
+	DevMode bool
+
+	// RequestTimeout is the maximum duration for a request (defaults to 30s).
+	RequestTimeout time.Duration
+
+	// MaxRequestBodySize is the maximum size of a request body in bytes (defaults to 1MB).
+	MaxRequestBodySize int64
+
+	// MaxMessageLength is the maximum length of a message in characters (defaults to 1000).
+	MaxMessageLength int
 }
 
 // DefaultRouterSystemPromptTemplate is the default template for the router.
@@ -75,7 +78,19 @@ func (c *Config) applyDefaults() {
 		c.RouterSystemPromptTemplate = DefaultRouterSystemPromptTemplate
 	}
 
-	if c.AllowedOrigins == nil || len(c.AllowedOrigins) == 0 {
+	if len(c.AllowedOrigins) == 0 && c.DevMode {
 		c.AllowedOrigins = []string{"*"}
+	}
+
+	if c.RequestTimeout == 0 {
+		c.RequestTimeout = 30 * time.Second
+	}
+
+	if c.MaxRequestBodySize == 0 {
+		c.MaxRequestBodySize = 1 << 20 // 1MB
+	}
+
+	if c.MaxMessageLength == 0 {
+		c.MaxMessageLength = 1000
 	}
 }
