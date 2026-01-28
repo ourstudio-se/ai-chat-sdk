@@ -18,8 +18,8 @@ type SDK struct {
 func New(config Config) (*SDK, error) {
 	config.applyDefaults()
 
-	if config.OpenAIAPIKey == "" {
-		return nil, ErrOpenAIAPIKeyRequired
+	if config.OpenAIClient == nil {
+		return nil, errors.New("OpenAIClient is required")
 	}
 
 	if len(config.Experts) == 0 {
@@ -32,11 +32,8 @@ func New(config Config) (*SDK, error) {
 
 	logger := config.Logger
 
-	// Create OpenAI client
-	openaiClient, err := newOpenAIClient(config.OpenAIAPIKey, logger)
-	if err != nil {
-		return nil, errors.New("failed to create OpenAI client: " + err.Error())
-	}
+	// Wrap OpenAI client with internal API
+	openaiClient := newInternalOpenAIClient(config.OpenAIClient, logger)
 
 	// Create translator
 	translateFn := newTranslator(openaiClient.ChatJSON, logger, config.TranslatorSystemPrompt)

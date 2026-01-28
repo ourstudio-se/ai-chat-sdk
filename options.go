@@ -3,12 +3,14 @@ package aichat
 import (
 	"log/slog"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // Config holds SDK configuration.
 type Config struct {
-	// OpenAIAPIKey is the API key for OpenAI.
-	OpenAIAPIKey string
+	// OpenAIClient is the OpenAI client to use.
+	OpenAIClient *openai.Client
 
 	// Logger is the structured logger to use. If nil, a default logger is used.
 	Logger *slog.Logger

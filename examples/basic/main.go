@@ -8,6 +8,7 @@ import (
 	"os"
 
 	aichat "github.com/ourstudio-se/ai-chat-sdk"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // Simulated product database
@@ -38,8 +39,11 @@ func main() {
 		Level: slog.LevelDebug,
 	}))
 
+	// Create OpenAI client with your preferred configuration
+	openaiClient := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
+
 	sdk, err := aichat.New(aichat.Config{
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+		OpenAIClient: openaiClient,
 		Logger:       logger,
 
 		// Define experts with their metadata and handlers in one place

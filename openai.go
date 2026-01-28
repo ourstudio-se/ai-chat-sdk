@@ -50,18 +50,12 @@ func defaultChatJSONOptions() ChatJSONOptions {
 	}
 }
 
-// newOpenAIClient creates a new OpenAI client with function-based API.
-func newOpenAIClient(apiKey string, logger *slog.Logger) (*openaiClient, error) {
-	if apiKey == "" {
-		return nil, errors.New("OpenAI API key is required")
-	}
-
-	client := openai.NewClient(apiKey)
-
+// newInternalOpenAIClient wraps an *openai.Client with the internal function-based API.
+func newInternalOpenAIClient(client *openai.Client, logger *slog.Logger) *openaiClient {
 	return &openaiClient{
 		Chat:     newChatFn(client, logger),
 		ChatJSON: newChatJSONFn(client, logger),
-	}, nil
+	}
 }
 
 func newChatFn(client *openai.Client, logger *slog.Logger) ChatFn {
