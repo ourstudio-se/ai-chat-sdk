@@ -2,6 +2,7 @@ package aichat
 
 import (
 	"log/slog"
+	"time"
 )
 
 // Config holds SDK configuration.
@@ -38,8 +39,21 @@ type Config struct {
 	// Glossary contains domain-specific term translations (optional).
 	Glossary map[string]GlossaryTerms
 
-	// AllowedOrigins for CORS (optional, defaults to ["*"]).
+	// AllowedOrigins for CORS. Must be explicitly configured unless DevMode is enabled.
 	AllowedOrigins []string
+
+	// DevMode enables permissive settings for development (e.g., allows all CORS origins).
+	// IMPORTANT: Do not enable in production.
+	DevMode bool
+
+	// RequestTimeout is the maximum duration for a request (defaults to 30s).
+	RequestTimeout time.Duration
+
+	// MaxRequestBodySize is the maximum size of a request body in bytes (defaults to 1MB).
+	MaxRequestBodySize int64
+
+	// MaxMessageLength is the maximum length of a message in characters (defaults to 10000).
+	MaxMessageLength int
 }
 
 // GlossaryTerms contains translations for a term in different languages.
@@ -75,7 +89,19 @@ func (c *Config) applyDefaults() {
 		c.RouterSystemPromptTemplate = DefaultRouterSystemPromptTemplate
 	}
 
-	if c.AllowedOrigins == nil || len(c.AllowedOrigins) == 0 {
+	if len(c.AllowedOrigins) == 0 && c.DevMode {
 		c.AllowedOrigins = []string{"*"}
+	}
+
+	if c.RequestTimeout == 0 {
+		c.RequestTimeout = 30 * time.Second
+	}
+
+	if c.MaxRequestBodySize == 0 {
+		c.MaxRequestBodySize = 1 << 20 // 1MB
+	}
+
+	if c.MaxMessageLength == 0 {
+		c.MaxMessageLength = 10000
 	}
 }

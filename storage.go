@@ -52,19 +52,24 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 				return nil, ErrConversationNotFound
 			}
 
-			// Return a copy to prevent concurrent modification
-			copy := *conversation
-			copy.Messages = make([]Message, len(conversation.Messages))
+			// Return a deep copy to prevent concurrent modification
+			result := *conversation
+			result.Messages = make([]Message, len(conversation.Messages))
 			for i := range conversation.Messages {
-				copy.Messages[i] = conversation.Messages[i]
+				msg := conversation.Messages[i]
+				if msg.Expert != nil {
+					expertCopy := *msg.Expert
+					msg.Expert = &expertCopy
+				}
+				result.Messages[i] = msg
 			}
 
 			logger.Debug("retrieved conversation",
 				slog.String("conversation_id", id),
-				slog.Int("message_count", len(copy.Messages)),
+				slog.Int("message_count", len(result.Messages)),
 			)
 
-			return &copy, nil
+			return &result, nil
 		},
 
 		AddMessage: func(ctx context.Context, id string, msg Message) error {

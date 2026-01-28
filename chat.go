@@ -26,6 +26,10 @@ func New(config Config) (*SDK, error) {
 		return nil, errors.New("at least one expert must be configured")
 	}
 
+	if len(config.AllowedOrigins) == 0 {
+		return nil, errors.New("AllowedOrigins must be configured (or enable DevMode)")
+	}
+
 	logger := config.Logger
 
 	// Create OpenAI client
@@ -75,12 +79,14 @@ func New(config Config) (*SDK, error) {
 
 	// Create HTTP handlers
 	healthHandler := newHealthHandler()
-	chatHandler := newChatHandler(processChatFn, logger)
-	chatStreamHandler := newChatStreamHandler(processChatFn, logger)
+	chatHandler := newChatHandler(processChatFn, config.MaxMessageLength, logger)
+	chatStreamHandler := newChatStreamHandler(processChatFn, config.MaxMessageLength, logger)
 
 	// Create HTTP router
 	httpHandler := newHTTPRouter(
 		config.AllowedOrigins,
+		config.RequestTimeout,
+		config.MaxRequestBodySize,
 		logger,
 		healthHandler,
 		chatHandler,
