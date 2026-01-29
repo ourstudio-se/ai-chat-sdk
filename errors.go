@@ -22,5 +22,5 @@ var (
 	ErrExpertNotFound = errors.New("expert not found")
 
 	// ErrInvalidID indicates an invalid ID was provided.
-	ErrInvalidID = errors.New("invalid ID: must be alphanumeric with hyphens only")
+	ErrInvalidID = errors.New("invalid ID: must be 1-255 alphanumeric characters, may contain hyphens between characters")
 )

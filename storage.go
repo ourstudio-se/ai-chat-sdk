@@ -14,8 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// validIDPattern matches UUIDs and safe alphanumeric strings with hyphens
-var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+// validIDPattern matches safe alphanumeric strings with hyphens as separators.
+// Pattern ensures IDs start and end with alphanumeric characters, with single hyphens allowed as separators.
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
 // validateID checks if an ID is safe to use in file paths and prevents path traversal.
 func validateID(id string) error {
@@ -139,6 +140,10 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 		Save: func(ctx context.Context, conversation *Conversation) error {
 			mu.Lock()
 			defer mu.Unlock()
+
+			if err := validateID(conversation.ID); err != nil {
+				return err
+			}
 
 			conversations[conversation.ID] = conversation
 			return nil
