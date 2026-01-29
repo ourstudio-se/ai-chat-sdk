@@ -34,6 +34,22 @@ type Product struct {
 	Features []string
 }
 
+// ProductDetails is a typed struct for product expert responses.
+// Consumers define their own Details types for type-safe access.
+//
+// Example usage with GetDetails:
+//
+//	result, _ := sdk.ProcessChat()(ctx, req)
+//	details, err := aichat.GetDetails[ProductDetails](result.ExpertResult)
+//	if err == nil {
+//	    fmt.Println(details.Product.Name)  // Full type safety!
+//	}
+type ProductDetails struct {
+	ProductID string  `json:"productId"`
+	Product   Product `json:"product"`
+	Source    string  `json:"source"`
+}
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
@@ -95,10 +111,10 @@ func handleProductQuestion(ctx context.Context, req aichat.ExpertRequest) (*aich
 
 	return &aichat.ExpertResult{
 		Answer: answer,
-		Details: map[string]any{
-			"productId": req.EntityID,
-			"product":   product,
-			"source":    "product_database",
+		Details: ProductDetails{
+			ProductID: req.EntityID,
+			Product:   product,
+			Source:    "product_database",
 		},
 	}, nil
 }
