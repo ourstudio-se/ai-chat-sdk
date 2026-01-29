@@ -2,6 +2,8 @@ package aichat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -73,6 +75,35 @@ type ExpertResult struct {
 	Answer     string     `json:"answer"`
 	Reasoning  string     `json:"reasoning,omitempty"`
 	Details    any        `json:"details,omitempty"`
+}
+
+// GetDetails extracts the Details field from an ExpertResult as the specified type T.
+// This provides type-safe access to expert-specific details that consumers define.
+//
+// Example:
+//
+//	type ProductDetails struct {
+//	    ProductID string  `json:"productId"`
+//	    Product   Product `json:"product"`
+//	}
+//
+//	details, err := aichat.GetDetails[ProductDetails](result.ExpertResult)
+//	if err == nil {
+//	    fmt.Println(details.Product.Name)  // Full type safety!
+//	}
+func GetDetails[T any](result *ExpertResult) (T, error) {
+	var zero T
+	if result == nil {
+		return zero, errors.New("expert result is nil")
+	}
+	if result.Details == nil {
+		return zero, errors.New("details is nil")
+	}
+	details, ok := result.Details.(T)
+	if !ok {
+		return zero, fmt.Errorf("details type mismatch: expected %T, got %T", zero, result.Details)
+	}
+	return details, nil
 }
 
 // HandleQuestionFn handles an expert question.
