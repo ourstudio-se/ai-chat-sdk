@@ -7,11 +7,43 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// validIDPattern matches UUIDs and safe alphanumeric strings with hyphens
+var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+
+// validateID checks if an ID is safe to use in file paths and prevents path traversal.
+func validateID(id string) error {
+	if id == "" {
+		return ErrInvalidID
+	}
+	// Check length to prevent excessively long IDs
+	if len(id) > 255 {
+		return ErrInvalidID
+	}
+	// Check for path traversal patterns
+	if filepath.Base(id) != id {
+		return ErrInvalidID
+	}
+	// Check for valid characters
+	if !validIDPattern.MatchString(id) {
+		return ErrInvalidID
+	}
+	return nil
+}
+
+// validateEntityID validates an entity ID, allowing empty values.
+func validateEntityID(id string) error {
+	if id == "" {
+		return nil // Empty entity IDs are allowed
+	}
+	return validateID(id)
+}
 
 // NewMemoryStore creates a new in-memory conversation store.
 // This is useful for development and testing, but conversations are lost on restart.
@@ -25,6 +57,10 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 		Create: func(ctx context.Context, entityID string) (*Conversation, error) {
 			mu.Lock()
 			defer mu.Unlock()
+
+			if err := validateEntityID(entityID); err != nil {
+				return nil, fmt.Errorf("invalid entity ID: %w", err)
+			}
 
 			conversation := &Conversation{
 				ID:        uuid.New().String(),
@@ -46,6 +82,10 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 		Get: func(ctx context.Context, id string) (*Conversation, error) {
 			mu.RLock()
 			defer mu.RUnlock()
+
+			if err := validateID(id); err != nil {
+				return nil, err
+			}
 
 			conversation, exists := conversations[id]
 			if !exists {
@@ -76,6 +116,10 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 			mu.Lock()
 			defer mu.Unlock()
 
+			if err := validateID(id); err != nil {
+				return err
+			}
+
 			conversation, exists := conversations[id]
 			if !exists {
 				return ErrConversationNotFound
@@ -104,7 +148,7 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 
 // NewFileStore creates a new file-based conversation store.
 func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return ConversationStore{}, fmt.Errorf("failed to create conversations directory: %w", err)
 	}
 
@@ -117,6 +161,10 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 	}
 
 	saveUnlocked := func(conversation *Conversation) error {
+		if err := validateID(conversation.ID); err != nil {
+			return err
+		}
+
 		path := getFilePath(conversation.ID)
 
 		data, err := json.MarshalIndent(conversation, "", "  ")
@@ -124,7 +172,7 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 			return fmt.Errorf("failed to marshal conversation: %w", err)
 		}
 
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0600); err != nil {
 			return fmt.Errorf("failed to write conversation file: %w", err)
 		}
 
@@ -132,6 +180,10 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 	}
 
 	getUnlocked := func(id string) (*Conversation, error) {
+		if err := validateID(id); err != nil {
+			return nil, err
+		}
+
 		path := getFilePath(id)
 
 		data, err := os.ReadFile(path)
@@ -154,6 +206,10 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 		Create: func(ctx context.Context, entityID string) (*Conversation, error) {
 			mu.Lock()
 			defer mu.Unlock()
+
+			if err := validateEntityID(entityID); err != nil {
+				return nil, fmt.Errorf("invalid entity ID: %w", err)
+			}
 
 			conversation := &Conversation{
 				ID:        uuid.New().String(),
@@ -178,6 +234,10 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 			mu.RLock()
 			defer mu.RUnlock()
 
+			if err := validateID(id); err != nil {
+				return nil, err
+			}
+
 			conversation, err := getUnlocked(id)
 			if err != nil {
 				return nil, err
@@ -194,6 +254,10 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 		AddMessage: func(ctx context.Context, id string, msg Message) error {
 			mu.Lock()
 			defer mu.Unlock()
+
+			if err := validateID(id); err != nil {
+				return err
+			}
 
 			conversation, err := getUnlocked(id)
 			if err != nil {

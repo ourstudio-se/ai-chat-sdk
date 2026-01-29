@@ -80,6 +80,7 @@ func (c *Config) applyDefaults() {
 
 	if len(c.AllowedOrigins) == 0 && c.DevMode {
 		c.AllowedOrigins = []string{"*"}
+		c.Logger.Warn("DevMode enabled with wildcard CORS (*). This is INSECURE and should NEVER be used in production!")
 	}
 
 	if c.RequestTimeout == 0 {
