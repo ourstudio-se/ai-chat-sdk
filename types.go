@@ -212,6 +212,7 @@ type StreamEvent struct {
 	ExpertName     *string         `json:"expertName,omitempty"`
 	Content        *string         `json:"content,omitempty"`
 	MessageID      *string         `json:"messageId,omitempty"`
+	Details        any             `json:"details,omitempty"`
 }
 
 // HTTPChatRequest represents the HTTP request body for chat endpoints.
@@ -229,4 +230,5 @@ type HTTPChatResponse struct {
 	Message        string     `json:"message"`
 	Reasoning      string     `json:"reasoning"`
 	Response       string     `json:"response"`
+	Details        any        `json:"details,omitempty"`
 }

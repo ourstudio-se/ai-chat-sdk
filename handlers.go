@@ -128,6 +128,7 @@ func buildChatResponse(result *ChatResult, message string) HTTPChatResponse {
 		Message:        message,
 		Reasoning:      result.ExpertResult.Reasoning,
 		Response:       result.ExpertResult.Answer,
+		Details:        result.ExpertResult.Details,
 	}
 }
 
@@ -139,6 +140,7 @@ func buildDoneStreamEvent(result *ChatResult) StreamEvent {
 		Expert:         &expertType,
 		ExpertName:     &result.ExpertResult.ExpertName,
 		Content:        &result.ExpertResult.Answer,
+		Details:        result.ExpertResult.Details,
 	}
 }
 
