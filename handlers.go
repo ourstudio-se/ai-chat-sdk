@@ -154,7 +154,7 @@ func setSSEHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// CORS headers are already set by the CORS middleware
 }
 
 func sendStreamEvent(w http.ResponseWriter, event StreamEvent, logger *slog.Logger) {
