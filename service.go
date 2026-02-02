@@ -36,7 +36,7 @@ func NewChatService(
 		}
 
 		// 3. Store user message (original language)
-		if err := storeUserMessage(ctx, store, conversation.ID, req.Message); err != nil {
+		if err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
 			return nil, err
 		}
 
@@ -45,6 +45,7 @@ func NewChatService(
 		expertReq := ExpertRequest{
 			Message:  translation.TranslatedMessage,
 			EntityID: conversation.EntityID,
+			Data:     req.Data,
 		}
 
 		expertResult, err := dispatchQuestion(ctx, expertReq)
@@ -108,11 +109,12 @@ func getOrCreateConversation(
 	return conv, nil
 }
 
-func storeUserMessage(ctx context.Context, store ConversationStore, conversationID, message string) error {
+func storeUserMessage(ctx context.Context, store ConversationStore, conversationID, message string, data any) error {
 	msg := Message{
 		Role:      RoleUser,
 		Content:   message,
 		Timestamp: time.Now(),
+		Data:      data,
 	}
 	return store.AddMessage(ctx, conversationID, msg)
 }
@@ -123,6 +125,86 @@ func storeAssistantMessage(ctx context.Context, store ConversationStore, convers
 		Content:   result.Answer,
 		Timestamp: time.Now(),
 		Expert:    &result.ExpertName,
+		Data:      result.Details,
 	}
 	return store.AddMessage(ctx, conversationID, msg)
+}
+
+// NewChatServiceStreaming creates a streaming chat processing function.
+func NewChatServiceStreaming(
+	translate TranslateFn,
+	formatResponse FormatResponseFn,
+	dispatchQuestion DispatchQuestionStreamFn,
+	store ConversationStore,
+	logger *slog.Logger,
+) ProcessChatStreamFn {
+	return func(ctx context.Context, req ChatRequest, stream StreamCallback) (*ChatResult, error) {
+		// 1. Send translating event
+		stream(StreamEvent{Type: EventTranslating})
+
+		// Translate message to English for consistent processing
+		translation, err := translate(ctx, req.Message)
+		if err != nil {
+			return nil, fmt.Errorf("translation failed: %w", err)
+		}
+
+		logger.Debug("message translated",
+			"original", req.Message,
+			"translated", translation.TranslatedMessage,
+			"detected_language", translation.DetectedLanguage,
+			"confidence", translation.Confidence,
+		)
+
+		// 2. Get or create conversation
+		conversation, err := getOrCreateConversation(ctx, req, store)
+		if err != nil {
+			return nil, err
+		}
+
+		// 3. Store user message (original language)
+		if err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
+			return nil, err
+		}
+
+		// 4. Route and process with expert (using English translation)
+		expertReq := ExpertRequest{
+			Message:  translation.TranslatedMessage,
+			EntityID: conversation.EntityID,
+			Data:     req.Data,
+		}
+
+		expertResult, err := dispatchQuestion(ctx, expertReq, stream)
+		if err != nil {
+			return nil, err
+		}
+
+		// 5. Format response in user's language
+		formattedResponse, err := formatResponse(ctx, FormatRequest{
+			ExpertType:         expertResult.ExpertType,
+			Answer:             expertResult.Answer,
+			OriginalQuestion:   req.Message,
+			TranslatedQuestion: translation.TranslatedMessage,
+			DetectedLanguage:   translation.DetectedLanguage,
+		})
+		if err != nil {
+			logger.Warn("formatting failed, using fallback answer", "error", err)
+			formattedResponse = &FormatResponse{
+				FormattedAnswer: expertResult.Answer,
+				Language:        translation.DetectedLanguage,
+			}
+		}
+
+		// Update expert result with formatted answer
+		expertResult.Answer = formattedResponse.FormattedAnswer
+
+		// 6. Store assistant message
+		if err := storeAssistantMessage(ctx, store, conversation.ID, expertResult); err != nil {
+			logger.Warn("failed to store assistant message", "error", err)
+		}
+
+		return &ChatResult{
+			ConversationID: conversation.ID,
+			ExpertResult:   expertResult,
+		}, nil
+	}
 }

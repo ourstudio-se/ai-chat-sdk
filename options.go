@@ -9,8 +9,16 @@ import (
 
 // Config holds SDK configuration.
 type Config struct {
-	// OpenAIClient is the OpenAI client to use.
+	// OpenAIClient is the OpenAI-compatible client to use.
+	// For OpenAI: use openai.NewClient(apiKey)
+	// For OpenRouter: use aichat.NewOpenRouterClient(cfg)
 	OpenAIClient *openai.Client
+
+	// ModelMap overrides the default model tier to model name mapping.
+	// Use this when using OpenRouter or other providers with different model names.
+	// If nil, defaults to OpenAI model names (gpt-4o-mini, gpt-4o).
+	// See DefaultOpenRouterModelMap() and GPTOpenRouterModelMap() for presets.
+	ModelMap map[ModelTier]string
 
 	// Logger is the structured logger to use. If nil, a default logger is used.
 	Logger *slog.Logger
@@ -66,7 +74,7 @@ Your job is to determine which expert should respond:
 Respond ONLY with JSON in this format:
 {"expert": "<expert_type>", "reasoning": "brief explanation"}
 
-IMPORTANT: The "reasoning" field should be in the same language as the user's question.`
+IMPORTANT: Always respond in English.`
 
 // applyDefaults fills in default values for the config.
 func (c *Config) applyDefaults() {

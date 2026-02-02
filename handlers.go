@@ -53,6 +53,7 @@ func newChatHandler(processChat ProcessChatFn, maxMessageLength int, logger *slo
 			Message:        httpReq.Message,
 			ConversationID: stringValue(httpReq.ConversationID),
 			EntityID:       stringValue(httpReq.EntityID),
+			Data:           httpReq.Data,
 		}
 
 		// 4. Call service (business logic)
@@ -70,7 +71,7 @@ func newChatHandler(processChat ProcessChatFn, maxMessageLength int, logger *slo
 }
 
 // newChatStreamHandler returns a handler for POST /chat/stream requests with SSE.
-func newChatStreamHandler(processChat ProcessChatFn, maxMessageLength int, logger *slog.Logger) http.HandlerFunc {
+func newChatStreamHandler(processChatStream ProcessChatStreamFn, maxMessageLength int, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Parse request
 		var httpReq HTTPChatRequest
@@ -99,23 +100,28 @@ func newChatStreamHandler(processChat ProcessChatFn, maxMessageLength int, logge
 			Message:        httpReq.Message,
 			ConversationID: stringValue(httpReq.ConversationID),
 			EntityID:       stringValue(httpReq.EntityID),
+			Data:           httpReq.Data,
 		}
 
-		// 5. Send "thinking" event
+		// 5. Send "thinking" event immediately
 		sendStreamEvent(w, StreamEvent{
 			Type: EventThinking,
 		}, logger)
-		flush(w)
 
-		// 6. Call service (business logic)
-		result, err := processChat(r.Context(), serviceReq)
+		// 6. Create stream callback that sends events to the client
+		streamCallback := func(event StreamEvent) {
+			sendStreamEvent(w, event, logger)
+		}
+
+		// 7. Call streaming service (business logic)
+		result, err := processChatStream(r.Context(), serviceReq, streamCallback)
 		if err != nil {
 			logger.Error("failed to process chat message", "error", err)
 			sendStreamEvent(w, errorStreamEvent("An error occurred while processing your message"), logger)
 			return
 		}
 
-		// 7. Send "done" event
+		// 8. Send "done" event
 		sendStreamEvent(w, buildDoneStreamEvent(result), logger)
 	}
 }
@@ -128,6 +134,7 @@ func buildChatResponse(result *ChatResult, message string) HTTPChatResponse {
 		Message:        message,
 		Reasoning:      result.ExpertResult.Reasoning,
 		Response:       result.ExpertResult.Answer,
+		Data:           result.ExpertResult.Details,
 	}
 }
 
@@ -139,6 +146,7 @@ func buildDoneStreamEvent(result *ChatResult) StreamEvent {
 		Expert:         &expertType,
 		ExpertName:     &result.ExpertResult.ExpertName,
 		Content:        &result.ExpertResult.Answer,
+		Data:           result.ExpertResult.Details,
 	}
 }
 
