@@ -12,24 +12,32 @@ import (
 
 // openaiClient is an internal struct of functions for OpenAI API access.
 type openaiClient struct {
-	Chat     ChatFn
-	ChatJSON ChatJSONFn
+	Chat       ChatFn
+	ChatJSON   ChatJSONFn
+	ChatStream ChatStreamFn
 }
 
-// modelMap maps model tiers to actual OpenAI model names.
-var modelMap = map[ModelTier]string{
+// defaultModelMap maps model tiers to actual OpenAI model names.
+var defaultModelMap = map[ModelTier]string{
 	ModelNano:      "gpt-4o-mini",
 	ModelMini:      "gpt-4o-mini",
 	ModelStandard:  "gpt-4o",
 	ModelReasoning: "gpt-4o",
 }
 
-// getModelName returns the actual OpenAI model name for a given tier.
-func getModelName(tier ModelTier) string {
+// getModelName returns the actual model name for a given tier using the provided map.
+func getModelName(tier ModelTier, modelMap map[ModelTier]string) string {
+	if modelMap == nil {
+		modelMap = defaultModelMap
+	}
 	if name, ok := modelMap[tier]; ok {
 		return name
 	}
-	return modelMap[ModelMini]
+	// Fallback to ModelMini from the provided map, or default
+	if name, ok := modelMap[ModelMini]; ok {
+		return name
+	}
+	return defaultModelMap[ModelMini]
 }
 
 // defaultChatOptions returns ChatOptions with sensible defaults.
@@ -51,21 +59,22 @@ func defaultChatJSONOptions() ChatJSONOptions {
 }
 
 // newInternalOpenAIClient wraps an *openai.Client with the internal function-based API.
-func newInternalOpenAIClient(client *openai.Client, logger *slog.Logger) *openaiClient {
+func newInternalOpenAIClient(client *openai.Client, logger *slog.Logger, modelMap map[ModelTier]string) *openaiClient {
 	return &openaiClient{
-		Chat:     newChatFn(client, logger),
-		ChatJSON: newChatJSONFn(client, logger),
+		Chat:       newChatFn(client, logger, modelMap),
+		ChatJSON:   newChatJSONFn(client, logger, modelMap),
+		ChatStream: newChatStreamFn(client, logger, modelMap),
 	}
 }
 
-func newChatFn(client *openai.Client, logger *slog.Logger) ChatFn {
+func newChatFn(client *openai.Client, logger *slog.Logger, modelMap map[ModelTier]string) ChatFn {
 	return func(ctx context.Context, systemPrompt, userMessage string, opts *ChatOptions) (string, error) {
 		if opts == nil {
 			defaultOpts := defaultChatOptions()
 			opts = &defaultOpts
 		}
 
-		modelName := getModelName(opts.Model)
+		modelName := getModelName(opts.Model, modelMap)
 
 		logger.Debug("creating chat completion",
 			slog.String("model", modelName),
@@ -117,14 +126,14 @@ func newChatFn(client *openai.Client, logger *slog.Logger) ChatFn {
 	}
 }
 
-func newChatJSONFn(client *openai.Client, logger *slog.Logger) ChatJSONFn {
+func newChatJSONFn(client *openai.Client, logger *slog.Logger, modelMap map[ModelTier]string) ChatJSONFn {
 	return func(ctx context.Context, systemPrompt, userMessage string, opts *ChatJSONOptions, result any) error {
 		if opts == nil {
 			defaultOpts := defaultChatJSONOptions()
 			opts = &defaultOpts
 		}
 
-		modelName := getModelName(opts.Model)
+		modelName := getModelName(opts.Model, modelMap)
 
 		logger.Debug("creating JSON chat completion",
 			slog.String("model", modelName),
@@ -180,5 +189,77 @@ func newChatJSONFn(client *openai.Client, logger *slog.Logger) ChatJSONFn {
 		)
 
 		return nil
+	}
+}
+
+func newChatStreamFn(client *openai.Client, logger *slog.Logger, modelMap map[ModelTier]string) ChatStreamFn {
+	return func(ctx context.Context, systemPrompt, userMessage string, opts *ChatOptions, onToken func(token string)) (string, error) {
+		if opts == nil {
+			defaultOpts := defaultChatOptions()
+			opts = &defaultOpts
+		}
+
+		modelName := getModelName(opts.Model, modelMap)
+
+		logger.Debug("creating streaming chat completion",
+			slog.String("model", modelName),
+			slog.Float64("temperature", float64(opts.Temperature)),
+			slog.Int("user_message_len", len(userMessage)),
+		)
+
+		req := openai.ChatCompletionRequest{
+			Model: modelName,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userMessage,
+				},
+			},
+			Temperature: opts.Temperature,
+			Stream:      true,
+		}
+
+		if opts.MaxTokens > 0 {
+			req.MaxTokens = opts.MaxTokens
+		}
+
+		stream, err := client.CreateChatCompletionStream(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("OpenAI streaming API error: %w", err)
+		}
+		defer stream.Close()
+
+		var fullContent string
+		for {
+			response, err := stream.Recv()
+			if errors.Is(err, context.Canceled) {
+				return fullContent, ctx.Err()
+			}
+			if err != nil {
+				// Stream finished
+				break
+			}
+
+			if len(response.Choices) > 0 {
+				delta := response.Choices[0].Delta.Content
+				if delta != "" {
+					fullContent += delta
+					if onToken != nil {
+						onToken(delta)
+					}
+				}
+			}
+		}
+
+		logger.Debug("streaming chat completion successful",
+			slog.String("model", modelName),
+			slog.Int("response_len", len(fullContent)),
+		)
+
+		return fullContent, nil
 	}
 }

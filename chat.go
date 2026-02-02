@@ -33,7 +33,7 @@ func New(config Config) (*SDK, error) {
 	logger := config.Logger
 
 	// Wrap OpenAI client with internal API
-	openaiClient := newInternalOpenAIClient(config.OpenAIClient, logger)
+	openaiClient := newInternalOpenAIClient(config.OpenAIClient, logger, config.ModelMap)
 
 	// Create translator
 	translateFn := newTranslator(openaiClient.ChatJSON, logger, config.TranslatorSystemPrompt)
@@ -51,8 +51,16 @@ func New(config Config) (*SDK, error) {
 	// Create formatter
 	formatResponseFn := newFormatter(openaiClient.Chat, logger, config.FormatterSystemPrompt)
 
-	// Create dispatcher
+	// Create dispatcher (non-streaming for regular chat)
 	dispatchQuestionFn := NewDispatcher(
+		routeQuestionFn,
+		config.Experts,
+		config.DefaultExpert,
+		logger,
+	)
+
+	// Create streaming dispatcher
+	dispatchQuestionStreamFn := NewDispatcherStreaming(
 		routeQuestionFn,
 		config.Experts,
 		config.DefaultExpert,
@@ -65,7 +73,7 @@ func New(config Config) (*SDK, error) {
 		store = NewMemoryStore(logger)
 	}
 
-	// Create chat service
+	// Create chat service (non-streaming)
 	processChatFn := NewChatService(
 		translateFn,
 		formatResponseFn,
@@ -74,10 +82,19 @@ func New(config Config) (*SDK, error) {
 		logger,
 	)
 
+	// Create streaming chat service
+	processChatStreamFn := NewChatServiceStreaming(
+		translateFn,
+		formatResponseFn,
+		dispatchQuestionStreamFn,
+		store,
+		logger,
+	)
+
 	// Create HTTP handlers
 	healthHandler := newHealthHandler()
 	chatHandler := newChatHandler(processChatFn, config.MaxMessageLength, logger)
-	chatStreamHandler := newChatStreamHandler(processChatFn, config.MaxMessageLength, logger)
+	chatStreamHandler := newChatStreamHandler(processChatStreamFn, config.MaxMessageLength, logger)
 
 	// Create HTTP router
 	httpHandler := newHTTPRouter(

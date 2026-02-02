@@ -40,6 +40,9 @@ type ChatFn func(ctx context.Context, systemPrompt, userMessage string, opts *Ch
 // ChatJSONFn performs a chat completion with JSON mode and unmarshals into result.
 type ChatJSONFn func(ctx context.Context, systemPrompt, userMessage string, opts *ChatJSONOptions, result any) error
 
+// ChatStreamFn performs a streaming chat completion and calls the callback for each token.
+type ChatStreamFn func(ctx context.Context, systemPrompt, userMessage string, opts *ChatOptions, onToken func(token string)) (string, error)
+
 // TranslationResult contains the result of a translation.
 type TranslationResult struct {
 	TranslatedMessage string  `json:"translatedMessage"`
@@ -66,6 +69,7 @@ type ExpertRequest struct {
 	Message          string
 	EntityID         string
 	RoutingReasoning string
+	Data             any // Structured data passed from the request
 }
 
 // ExpertResult is returned by expert handlers.
@@ -109,6 +113,10 @@ func GetDetails[T any](result *ExpertResult) (T, error) {
 // HandleQuestionFn handles an expert question.
 type HandleQuestionFn func(ctx context.Context, req ExpertRequest) (*ExpertResult, error)
 
+// HandleQuestionStreamFn handles an expert question with streaming support.
+// The stream callback should be called with EventContent events for each token/chunk.
+type HandleQuestionStreamFn func(ctx context.Context, req ExpertRequest, stream StreamCallback) (*ExpertResult, error)
+
 // Expert combines expert metadata with its handler.
 type Expert struct {
 	// Name is the display name of the expert.
@@ -119,6 +127,10 @@ type Expert struct {
 
 	// Handler processes questions for this expert.
 	Handler HandleQuestionFn
+
+	// StreamHandler processes questions with streaming support.
+	// If nil, Handler will be used and content sent in one chunk.
+	StreamHandler HandleQuestionStreamFn
 }
 
 // FormatRequest represents a formatting request.
@@ -144,6 +156,7 @@ type ChatRequest struct {
 	ConversationID string `json:"conversationId,omitempty"`
 	Message        string `json:"message"`
 	EntityID       string `json:"entityId,omitempty"`
+	Data           any    `json:"data,omitempty"` // Structured data for experts
 }
 
 // ChatResult is the processed chat result.
@@ -155,8 +168,17 @@ type ChatResult struct {
 // ProcessChatFn processes a complete chat request.
 type ProcessChatFn func(ctx context.Context, req ChatRequest) (*ChatResult, error)
 
+// StreamCallback is called to send streaming events to the client.
+type StreamCallback func(event StreamEvent)
+
+// ProcessChatStreamFn processes a chat request with streaming support.
+type ProcessChatStreamFn func(ctx context.Context, req ChatRequest, stream StreamCallback) (*ChatResult, error)
+
 // DispatchQuestionFn routes and processes a question with the appropriate expert.
 type DispatchQuestionFn func(ctx context.Context, req ExpertRequest) (*ExpertResult, error)
+
+// DispatchQuestionStreamFn routes and processes a question with streaming support.
+type DispatchQuestionStreamFn func(ctx context.Context, req ExpertRequest, stream StreamCallback) (*ExpertResult, error)
 
 // MessageRole represents the role of a message sender.
 type MessageRole string
@@ -172,6 +194,7 @@ type Message struct {
 	Content   string      `json:"content"`
 	Timestamp time.Time   `json:"timestamp"`
 	Expert    *string     `json:"expert,omitempty"`
+	Data      any         `json:"data,omitempty"`
 }
 
 // Conversation represents a conversation between a user and the assistant.
@@ -199,9 +222,13 @@ type ConversationStore struct {
 type StreamEventType string
 
 const (
-	EventThinking StreamEventType = "thinking"
-	EventDone     StreamEventType = "done"
-	EventError    StreamEventType = "error"
+	EventThinking    StreamEventType = "thinking"
+	EventTranslating StreamEventType = "translating"
+	EventRouting     StreamEventType = "routing"
+	EventProcessing  StreamEventType = "processing"
+	EventContent     StreamEventType = "content"
+	EventDone        StreamEventType = "done"
+	EventError       StreamEventType = "error"
 )
 
 // StreamEvent represents a server-sent event for streaming responses.
@@ -212,6 +239,7 @@ type StreamEvent struct {
 	ExpertName     *string         `json:"expertName,omitempty"`
 	Content        *string         `json:"content,omitempty"`
 	MessageID      *string         `json:"messageId,omitempty"`
+	Data           any             `json:"data,omitempty"` // Structured data from expert
 }
 
 // HTTPChatRequest represents the HTTP request body for chat endpoints.
@@ -219,6 +247,7 @@ type HTTPChatRequest struct {
 	Message        string  `json:"message"`
 	ConversationID *string `json:"conversationId,omitempty"`
 	EntityID       *string `json:"entityId,omitempty"`
+	Data           any     `json:"data,omitempty"` // Structured data for experts
 }
 
 // HTTPChatResponse represents the HTTP response body for chat endpoints.
@@ -229,4 +258,5 @@ type HTTPChatResponse struct {
 	Message        string     `json:"message"`
 	Reasoning      string     `json:"reasoning"`
 	Response       string     `json:"response"`
+	Data           any        `json:"data,omitempty"` // Structured data from expert
 }
