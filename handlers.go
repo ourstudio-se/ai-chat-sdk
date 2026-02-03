@@ -2,6 +2,7 @@ package aichat
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -126,9 +127,62 @@ func newChatStreamHandler(processChatStream ProcessChatStreamFn, maxMessageLengt
 	}
 }
 
+// newFeedbackHandler returns a handler for POST /feedback requests.
+func newFeedbackHandler(store ConversationStore, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req HTTPFeedbackRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+
+		if req.ConversationID == "" {
+			respondError(w, http.StatusBadRequest, "conversationId is required")
+			return
+		}
+
+		if req.MessageID == "" {
+			respondError(w, http.StatusBadRequest, "messageId is required")
+			return
+		}
+
+		if req.Type != FeedbackThumbsUp && req.Type != FeedbackThumbsDown {
+			respondError(w, http.StatusBadRequest, "type must be 'thumbs_up' or 'thumbs_down'")
+			return
+		}
+
+		feedback := MessageFeedback{
+			Type:      req.Type,
+			Comment:   req.Comment,
+			Timestamp: time.Now(),
+		}
+
+		err := store.UpdateFeedback(r.Context(), req.ConversationID, req.MessageID, feedback)
+		if err != nil {
+			if errors.Is(err, ErrConversationNotFound) {
+				respondError(w, http.StatusNotFound, "Conversation not found")
+				return
+			}
+			if errors.Is(err, ErrMessageNotFound) {
+				respondError(w, http.StatusNotFound, "Message not found")
+				return
+			}
+			logger.Error("failed to update feedback", "error", err)
+			respondError(w, http.StatusInternalServerError, "Failed to save feedback")
+			return
+		}
+
+		respondJSON(w, http.StatusOK, HTTPFeedbackResponse{
+			Success:   true,
+			Timestamp: feedback.Timestamp,
+		})
+	}
+}
+
 func buildChatResponse(result *ChatResult, message string) HTTPChatResponse {
 	return HTTPChatResponse{
 		ConversationID: result.ConversationID,
+		MessageID:      result.MessageID,
 		Expert:         result.ExpertResult.ExpertType,
 		ExpertName:     result.ExpertResult.ExpertName,
 		Message:        message,
@@ -143,6 +197,7 @@ func buildDoneStreamEvent(result *ChatResult) StreamEvent {
 	return StreamEvent{
 		Type:           EventDone,
 		ConversationID: &result.ConversationID,
+		MessageID:      &result.MessageID,
 		Expert:         &expertType,
 		ExpertName:     &result.ExpertResult.ExpertName,
 		Content:        &result.ExpertResult.Answer,
@@ -212,6 +267,7 @@ func newHTTPRouter(
 	healthHandler http.HandlerFunc,
 	chatHandler http.HandlerFunc,
 	chatStreamHandler http.HandlerFunc,
+	feedbackHandler http.HandlerFunc,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -236,6 +292,7 @@ func newHTTPRouter(
 	r.Get("/health", healthHandler)
 	r.Post("/chat", chatHandler)
 	r.Post("/chat/stream", chatStreamHandler)
+	r.Post("/feedback", feedbackHandler)
 
 	return r
 }

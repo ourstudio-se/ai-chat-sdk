@@ -61,6 +61,10 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 					expertCopy := *msg.Expert
 					msg.Expert = &expertCopy
 				}
+				if msg.Feedback != nil {
+					feedbackCopy := *msg.Feedback
+					msg.Feedback = &feedbackCopy
+				}
 				result.Messages[i] = msg
 			}
 
@@ -98,6 +102,24 @@ func NewMemoryStore(logger *slog.Logger) ConversationStore {
 
 			conversations[conversation.ID] = conversation
 			return nil
+		},
+
+		UpdateFeedback: func(ctx context.Context, conversationID, messageID string, feedback MessageFeedback) error {
+			mu.Lock()
+			defer mu.Unlock()
+
+			conversation, exists := conversations[conversationID]
+			if !exists {
+				return ErrConversationNotFound
+			}
+
+			for i := range conversation.Messages {
+				if conversation.Messages[i].ID == messageID {
+					conversation.Messages[i].Feedback = &feedback
+					return nil
+				}
+			}
+			return ErrMessageNotFound
 		},
 	}
 }
@@ -220,6 +242,24 @@ func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error
 			defer mu.Unlock()
 
 			return saveUnlocked(conversation)
+		},
+
+		UpdateFeedback: func(ctx context.Context, conversationID, messageID string, feedback MessageFeedback) error {
+			mu.Lock()
+			defer mu.Unlock()
+
+			conversation, err := getUnlocked(conversationID)
+			if err != nil {
+				return err
+			}
+
+			for i := range conversation.Messages {
+				if conversation.Messages[i].ID == messageID {
+					conversation.Messages[i].Feedback = &feedback
+					return saveUnlocked(conversation)
+				}
+			}
+			return ErrMessageNotFound
 		},
 	}, nil
 }
