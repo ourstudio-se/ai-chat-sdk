@@ -154,7 +154,7 @@ func newFeedbackHandler(store ConversationStore, logger *slog.Logger) http.Handl
 		feedback := MessageFeedback{
 			Type:      req.Type,
 			Comment:   req.Comment,
-			Timestamp: time.UTC().Now(),
+			Timestamp: time.Now().UTC(),
 		}
 
 		err := store.UpdateFeedback(r.Context(), req.ConversationID, req.MessageID, feedback)
