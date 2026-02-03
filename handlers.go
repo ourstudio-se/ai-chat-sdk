@@ -6,12 +6,27 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 )
+
+const (
+	maxFeedbackCommentLength = 1000
+)
+
+// sanitizeComment removes control characters while preserving newlines and tabs.
+func sanitizeComment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+}
 
 // HealthResponse represents the health check response.
 type HealthResponse struct {
@@ -151,9 +166,16 @@ func newFeedbackHandler(store ConversationStore, logger *slog.Logger) http.Handl
 			return
 		}
 
+		comment := sanitizeComment(req.Comment)
+		if len(comment) > maxFeedbackCommentLength {
+			respondError(w, http.StatusBadRequest,
+				fmt.Sprintf("comment exceeds maximum length of %d characters", maxFeedbackCommentLength))
+			return
+		}
+
 		feedback := MessageFeedback{
 			Type:      req.Type,
-			Comment:   req.Comment,
+			Comment:   comment,
 			Timestamp: time.Now().UTC(),
 		}
 
