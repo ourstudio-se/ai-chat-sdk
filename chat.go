@@ -95,6 +95,7 @@ func New(config Config) (*SDK, error) {
 	healthHandler := newHealthHandler()
 	chatHandler := newChatHandler(processChatFn, config.MaxMessageLength, logger)
 	chatStreamHandler := newChatStreamHandler(processChatStreamFn, config.MaxMessageLength, logger)
+	feedbackHandler := newFeedbackHandler(store, logger)
 
 	// Create HTTP router
 	httpHandler := newHTTPRouter(
@@ -105,6 +106,7 @@ func New(config Config) (*SDK, error) {
 		healthHandler,
 		chatHandler,
 		chatStreamHandler,
+		feedbackHandler,
 	)
 
 	return &SDK{

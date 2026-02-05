@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // NewChatService creates the main chat processing function.
@@ -36,7 +38,7 @@ func NewChatService(
 		}
 
 		// 3. Store user message (original language)
-		if err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
+		if _, err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
 			return nil, err
 		}
 
@@ -74,13 +76,15 @@ func NewChatService(
 		expertResult.Answer = formattedResponse.FormattedAnswer
 
 		// 6. Store assistant message
-		if err := storeAssistantMessage(ctx, store, conversation.ID, expertResult); err != nil {
+		messageID, err := storeAssistantMessage(ctx, store, conversation.ID, expertResult)
+		if err != nil {
 			logger.Warn("failed to store assistant message", "error", err)
 			// Don't fail - response is already generated
 		}
 
 		return &ChatResult{
 			ConversationID: conversation.ID,
+			MessageID:      messageID,
 			ExpertResult:   expertResult,
 		}, nil
 	}
@@ -109,25 +113,33 @@ func getOrCreateConversation(
 	return conv, nil
 }
 
-func storeUserMessage(ctx context.Context, store ConversationStore, conversationID, message string, data any) error {
+func generateMessageID() string {
+	return uuid.New().String()
+}
+
+func storeUserMessage(ctx context.Context, store ConversationStore, conversationID, message string, data any) (string, error) {
+	messageID := generateMessageID()
 	msg := Message{
+		ID:        messageID,
 		Role:      RoleUser,
 		Content:   message,
 		Timestamp: time.Now(),
 		Data:      data,
 	}
-	return store.AddMessage(ctx, conversationID, msg)
+	return messageID, store.AddMessage(ctx, conversationID, msg)
 }
 
-func storeAssistantMessage(ctx context.Context, store ConversationStore, conversationID string, result *ExpertResult) error {
+func storeAssistantMessage(ctx context.Context, store ConversationStore, conversationID string, result *ExpertResult) (string, error) {
+	messageID := generateMessageID()
 	msg := Message{
+		ID:        messageID,
 		Role:      RoleAssistant,
 		Content:   result.Answer,
 		Timestamp: time.Now(),
 		Expert:    &result.ExpertName,
 		Data:      result.Details,
 	}
-	return store.AddMessage(ctx, conversationID, msg)
+	return messageID, store.AddMessage(ctx, conversationID, msg)
 }
 
 // NewChatServiceStreaming creates a streaming chat processing function.
@@ -162,7 +174,7 @@ func NewChatServiceStreaming(
 		}
 
 		// 3. Store user message (original language)
-		if err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
+		if _, err := storeUserMessage(ctx, store, conversation.ID, req.Message, req.Data); err != nil {
 			return nil, err
 		}
 
@@ -198,12 +210,14 @@ func NewChatServiceStreaming(
 		expertResult.Answer = formattedResponse.FormattedAnswer
 
 		// 6. Store assistant message
-		if err := storeAssistantMessage(ctx, store, conversation.ID, expertResult); err != nil {
+		messageID, err := storeAssistantMessage(ctx, store, conversation.ID, expertResult)
+		if err != nil {
 			logger.Warn("failed to store assistant message", "error", err)
 		}
 
 		return &ChatResult{
 			ConversationID: conversation.ID,
+			MessageID:      messageID,
 			ExpertResult:   expertResult,
 		}, nil
 	}

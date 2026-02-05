@@ -162,6 +162,7 @@ type ChatRequest struct {
 // ChatResult is the processed chat result.
 type ChatResult struct {
 	ConversationID string        `json:"conversationId"`
+	MessageID      string        `json:"messageId"`
 	ExpertResult   *ExpertResult `json:"expertResult"`
 }
 
@@ -188,13 +189,30 @@ const (
 	RoleAssistant MessageRole = "assistant"
 )
 
+// FeedbackType represents the type of feedback.
+type FeedbackType string
+
+const (
+	FeedbackThumbsUp   FeedbackType = "thumbs_up"
+	FeedbackThumbsDown FeedbackType = "thumbs_down"
+)
+
+// MessageFeedback represents user feedback on a message.
+type MessageFeedback struct {
+	Type      FeedbackType `json:"type"`
+	Comment   string       `json:"comment,omitempty"`
+	Timestamp time.Time    `json:"timestamp"`
+}
+
 // Message represents a single message in a conversation.
 type Message struct {
-	Role      MessageRole `json:"role"`
-	Content   string      `json:"content"`
-	Timestamp time.Time   `json:"timestamp"`
-	Expert    *string     `json:"expert,omitempty"`
-	Data      any         `json:"data,omitempty"`
+	ID        string           `json:"id"`
+	Role      MessageRole      `json:"role"`
+	Content   string           `json:"content"`
+	Timestamp time.Time        `json:"timestamp"`
+	Expert    *string          `json:"expert,omitempty"`
+	Data      any              `json:"data,omitempty"`
+	Feedback  *MessageFeedback `json:"feedback,omitempty"`
 }
 
 // Conversation represents a conversation between a user and the assistant.
@@ -212,10 +230,11 @@ func AddMessage(c *Conversation, msg Message) {
 
 // ConversationStore is a struct of functions for conversation persistence.
 type ConversationStore struct {
-	Create     func(ctx context.Context, entityID string) (*Conversation, error)
-	Get        func(ctx context.Context, id string) (*Conversation, error)
-	AddMessage func(ctx context.Context, id string, msg Message) error
-	Save       func(ctx context.Context, conversation *Conversation) error
+	Create         func(ctx context.Context, entityID string) (*Conversation, error)
+	Get            func(ctx context.Context, id string) (*Conversation, error)
+	AddMessage     func(ctx context.Context, id string, msg Message) error
+	Save           func(ctx context.Context, conversation *Conversation) error
+	UpdateFeedback func(ctx context.Context, conversationID, messageID string, feedback MessageFeedback) error
 }
 
 // StreamEventType represents the type of server-sent event.
@@ -253,10 +272,25 @@ type HTTPChatRequest struct {
 // HTTPChatResponse represents the HTTP response body for chat endpoints.
 type HTTPChatResponse struct {
 	ConversationID string     `json:"conversationId"`
+	MessageID      string     `json:"messageId"`
 	Expert         ExpertType `json:"expert"`
 	ExpertName     string     `json:"expertName"`
 	Message        string     `json:"message"`
 	Reasoning      string     `json:"reasoning"`
 	Response       string     `json:"response"`
 	Data           any        `json:"data,omitempty"` // Structured data from expert
+}
+
+// HTTPFeedbackRequest represents the HTTP request body for feedback endpoints.
+type HTTPFeedbackRequest struct {
+	ConversationID string       `json:"conversationId"`
+	MessageID      string       `json:"messageId"`
+	Type           FeedbackType `json:"type"`
+	Comment        string       `json:"comment,omitempty"`
+}
+
+// HTTPFeedbackResponse represents the HTTP response body for feedback endpoints.
+type HTTPFeedbackResponse struct {
+	Success   bool      `json:"success"`
+	Timestamp time.Time `json:"timestamp"`
 }
