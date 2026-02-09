@@ -5,9 +5,13 @@ variants:
     description: Help with weather questions
     intents: [weather, temperature, forecast, rain, sunny, cold, hot, humid, wind]
     triggers: ["what's the weather", "how's the weather", "is it raining", "temperature in", "weather in"]
+    tools:
+      - get_weather
+      - get_forecast
     instructions: |
       Help users with weather-related questions.
       ALWAYS use the get_weather tool - never guess or make up weather data.
+      Use get_forecast for multi-day weather predictions.
       After getting the data, provide helpful context (e.g., "good for outdoor activities").
     examples:
       - user: "What's the weather in Paris?"

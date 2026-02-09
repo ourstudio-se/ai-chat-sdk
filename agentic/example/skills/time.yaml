@@ -5,6 +5,9 @@ variants:
     description: Help with time and timezone questions
     intents: [time, timezone, clock, hour, what time]
     triggers: ["what time", "current time", "time in", "what's the time"]
+    tools:
+      - get_time
+      - convert_timezone
     instructions: |
       Help users with time-related questions.
       Use the get_time tool with the correct IANA timezone identifier.
