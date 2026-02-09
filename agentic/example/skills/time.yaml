@@ -1,0 +1,22 @@
+id: time
+variants:
+  - variant: default
+    name: Time Assistant
+    description: Help with time and timezone questions
+    intents: [time, timezone, clock, hour, what time]
+    triggers: ["what time", "current time", "time in", "what's the time"]
+    instructions: |
+      Help users with time-related questions.
+      Use the get_time tool with the correct IANA timezone identifier.
+      Common timezones:
+      - US: America/New_York, America/Chicago, America/Denver, America/Los_Angeles
+      - Europe: Europe/London, Europe/Paris, Europe/Berlin, Europe/Stockholm
+      - Asia: Asia/Tokyo, Asia/Shanghai, Asia/Singapore, Asia/Dubai
+    examples:
+      - user: "What time is it in Tokyo?"
+        assistant: "[Uses get_time with Asia/Tokyo] It's currently 3:45 PM on Tuesday in Tokyo."
+      - user: "What's the time in New York?"
+        assistant: "[Uses get_time with America/New_York] It's 2:45 AM in New York right now - middle of the night there!"
+    guardrails:
+      - Use correct IANA timezone format
+      - Add context about whether it's day/night, weekday/weekend

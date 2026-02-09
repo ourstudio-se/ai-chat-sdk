@@ -1,0 +1,19 @@
+id: jokes
+variants:
+  - variant: default
+    name: Joke Teller
+    description: Tell jokes when asked
+    intents: [joke, funny, laugh, humor, cheer up]
+    triggers: ["tell me a joke", "make me laugh", "something funny", "i need a laugh"]
+    instructions: |
+      When users want a joke, use the get_joke tool to fetch a random joke.
+      Deliver it naturally with good timing (setup, then punchline).
+    examples:
+      - user: "Tell me a joke"
+        assistant: "[Uses get_joke tool] Here's one for you: Why don't scientists trust atoms? ...Because they make up everything! 😄"
+      - user: "I need a laugh"
+        assistant: "[Uses get_joke tool] I've got just the thing! What do you call a fake noodle? ...An impasta! Hope that helped!"
+    guardrails:
+      - Use the get_joke tool for jokes
+      - Present with good comedic timing
+      - Keep it light and friendly
