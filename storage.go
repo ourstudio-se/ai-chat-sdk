@@ -1,225 +1,91 @@
 package aichat
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
+// memoryStore is an in-memory conversation store.
+type memoryStore struct {
+	mu            sync.RWMutex
+	conversations map[string]*Conversation
+	feedback      map[string][]Feedback
+}
+
 // NewMemoryStore creates a new in-memory conversation store.
-// This is useful for development and testing, but conversations are lost on restart.
-func NewMemoryStore(logger *slog.Logger) ConversationStore {
-	var mu sync.RWMutex
-	conversations := make(map[string]*Conversation)
-
-	logger.Info("initialized in-memory store")
-
-	return ConversationStore{
-		Create: func(ctx context.Context, entityID string) (*Conversation, error) {
-			mu.Lock()
-			defer mu.Unlock()
-
-			conversation := &Conversation{
-				ID:        uuid.New().String(),
-				CreatedAt: time.Now(),
-				EntityID:  entityID,
-				Messages:  []Message{},
-			}
-
-			conversations[conversation.ID] = conversation
-
-			logger.Debug("created conversation",
-				slog.String("conversation_id", conversation.ID),
-				slog.String("entity_id", entityID),
-			)
-
-			return conversation, nil
-		},
-
-		Get: func(ctx context.Context, id string) (*Conversation, error) {
-			mu.RLock()
-			defer mu.RUnlock()
-
-			conversation, exists := conversations[id]
-			if !exists {
-				return nil, ErrConversationNotFound
-			}
-
-			// Return a deep copy to prevent concurrent modification
-			result := *conversation
-			result.Messages = make([]Message, len(conversation.Messages))
-			for i := range conversation.Messages {
-				msg := conversation.Messages[i]
-				if msg.Expert != nil {
-					expertCopy := *msg.Expert
-					msg.Expert = &expertCopy
-				}
-				result.Messages[i] = msg
-			}
-
-			logger.Debug("retrieved conversation",
-				slog.String("conversation_id", id),
-				slog.Int("message_count", len(result.Messages)),
-			)
-
-			return &result, nil
-		},
-
-		AddMessage: func(ctx context.Context, id string, msg Message) error {
-			mu.Lock()
-			defer mu.Unlock()
-
-			conversation, exists := conversations[id]
-			if !exists {
-				return ErrConversationNotFound
-			}
-
-			AddMessage(conversation, msg)
-
-			logger.Debug("added message to conversation",
-				slog.String("conversation_id", id),
-				slog.String("role", string(msg.Role)),
-				slog.Int("total_messages", len(conversation.Messages)),
-			)
-
-			return nil
-		},
-
-		Save: func(ctx context.Context, conversation *Conversation) error {
-			mu.Lock()
-			defer mu.Unlock()
-
-			conversations[conversation.ID] = conversation
-			return nil
-		},
+func NewMemoryStore() ConversationStore {
+	return &memoryStore{
+		conversations: make(map[string]*Conversation),
+		feedback:      make(map[string][]Feedback),
 	}
 }
 
-// NewFileStore creates a new file-based conversation store.
-func NewFileStore(dataDir string, logger *slog.Logger) (ConversationStore, error) {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return ConversationStore{}, fmt.Errorf("failed to create conversations directory: %w", err)
+// GetConversation retrieves a conversation by ID.
+func (s *memoryStore) GetConversation(ctx ChatCompletionContext, id string) (*Conversation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	conv, ok := s.conversations[id]
+	if !ok {
+		return nil, ErrConversationNotFound
+	}
+	return conv, nil
+}
+
+// SaveConversation saves a conversation.
+func (s *memoryStore) SaveConversation(ctx ChatCompletionContext, conv *Conversation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.conversations[conv.ID] = conv
+	return nil
+}
+
+// AddMessage adds a message to a conversation.
+func (s *memoryStore) AddMessage(ctx ChatCompletionContext, conversationID string, msg Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	conv, ok := s.conversations[conversationID]
+	if !ok {
+		// Create new conversation
+		conv = &Conversation{
+			ID:        conversationID,
+			Messages:  make([]Message, 0),
+			CreatedAt: time.Now(),
+		}
+		s.conversations[conversationID] = conv
 	}
 
-	logger.Info("initialized file store", slog.String("directory", dataDir))
+	conv.Messages = append(conv.Messages, msg)
+	conv.UpdatedAt = time.Now()
 
-	var mu sync.RWMutex
+	return nil
+}
 
-	getFilePath := func(id string) string {
-		return filepath.Join(dataDir, fmt.Sprintf("%s.json", id))
+// GetMessages retrieves messages for a conversation.
+func (s *memoryStore) GetMessages(ctx ChatCompletionContext, conversationID string, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	conv, ok := s.conversations[conversationID]
+	if !ok {
+		return nil, nil
 	}
 
-	saveUnlocked := func(conversation *Conversation) error {
-		path := getFilePath(conversation.ID)
-
-		data, err := json.MarshalIndent(conversation, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal conversation: %w", err)
-		}
-
-		if err := os.WriteFile(path, data, 0644); err != nil {
-			return fmt.Errorf("failed to write conversation file: %w", err)
-		}
-
-		return nil
+	messages := conv.Messages
+	if limit > 0 && len(messages) > limit {
+		messages = messages[len(messages)-limit:]
 	}
 
-	getUnlocked := func(id string) (*Conversation, error) {
-		path := getFilePath(id)
+	return messages, nil
+}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, ErrConversationNotFound
-			}
-			return nil, fmt.Errorf("failed to read conversation file: %w", err)
-		}
+// SaveFeedback saves feedback for a message.
+func (s *memoryStore) SaveFeedback(ctx ChatCompletionContext, fb Feedback) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-		var conversation Conversation
-		if err := json.Unmarshal(data, &conversation); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal conversation: %w", err)
-		}
-
-		return &conversation, nil
-	}
-
-	return ConversationStore{
-		Create: func(ctx context.Context, entityID string) (*Conversation, error) {
-			mu.Lock()
-			defer mu.Unlock()
-
-			conversation := &Conversation{
-				ID:        uuid.New().String(),
-				CreatedAt: time.Now(),
-				EntityID:  entityID,
-				Messages:  []Message{},
-			}
-
-			if err := saveUnlocked(conversation); err != nil {
-				return nil, fmt.Errorf("failed to save new conversation: %w", err)
-			}
-
-			logger.Debug("created conversation",
-				slog.String("conversation_id", conversation.ID),
-				slog.String("entity_id", entityID),
-			)
-
-			return conversation, nil
-		},
-
-		Get: func(ctx context.Context, id string) (*Conversation, error) {
-			mu.RLock()
-			defer mu.RUnlock()
-
-			conversation, err := getUnlocked(id)
-			if err != nil {
-				return nil, err
-			}
-
-			logger.Debug("retrieved conversation",
-				slog.String("conversation_id", id),
-				slog.Int("message_count", len(conversation.Messages)),
-			)
-
-			return conversation, nil
-		},
-
-		AddMessage: func(ctx context.Context, id string, msg Message) error {
-			mu.Lock()
-			defer mu.Unlock()
-
-			conversation, err := getUnlocked(id)
-			if err != nil {
-				return err
-			}
-
-			AddMessage(conversation, msg)
-
-			if err := saveUnlocked(conversation); err != nil {
-				return fmt.Errorf("failed to save conversation after adding message: %w", err)
-			}
-
-			logger.Debug("added message to conversation",
-				slog.String("conversation_id", id),
-				slog.String("role", string(msg.Role)),
-				slog.Int("total_messages", len(conversation.Messages)),
-			)
-
-			return nil
-		},
-
-		Save: func(ctx context.Context, conversation *Conversation) error {
-			mu.Lock()
-			defer mu.Unlock()
-
-			return saveUnlocked(conversation)
-		},
-	}, nil
+	s.feedback[fb.MessageID] = append(s.feedback[fb.MessageID], fb)
+	return nil
 }

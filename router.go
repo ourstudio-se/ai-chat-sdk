@@ -1,102 +1,110 @@
 package aichat
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"sort"
 	"strings"
 )
 
-// newRouter creates a routing function that determines which expert should handle a question.
-func newRouter(
-	chatJSON ChatJSONFn,
-	experts map[ExpertType]Expert,
-	systemPromptTemplate string,
-	defaultExpert ExpertType,
-	defaultReasoning string,
-	logger *slog.Logger,
-) RouteQuestionFn {
-	return func(ctx context.Context, message string, entityID string) (*RouteResult, error) {
-		expertsStr := buildExpertsDefinition(experts)
+// Router routes incoming messages to appropriate skills.
+type Router struct {
+	skills         SkillRegistry
+	defaultSkillID string
+}
 
-		systemPrompt := systemPromptTemplate
-		systemPrompt = strings.ReplaceAll(systemPrompt, "{{EXPERTS}}", expertsStr)
+// NewRouter creates a new router.
+func NewRouter(skills SkillRegistry, defaultSkillID string) *Router {
+	return &Router{
+		skills:         skills,
+		defaultSkillID: defaultSkillID,
+	}
+}
 
-		// Include entity ID in context if available
-		contextStr := "No additional context available."
-		if entityID != "" {
-			contextStr = fmt.Sprintf("Entity ID: %s", entityID)
+// Route finds the best skill for a message.
+func (r *Router) Route(message string) *Skill {
+	// Find matching skills
+	matches := r.skills.Match(message)
+
+	if len(matches) > 0 {
+		// Return the first match (could be enhanced with scoring)
+		return matches[0]
+	}
+
+	// Fall back to default skill
+	if r.defaultSkillID != "" {
+		if skill, ok := r.skills.Get(r.defaultSkillID); ok {
+			return skill
 		}
-		systemPrompt = strings.ReplaceAll(systemPrompt, "{{CONTEXT}}", contextStr)
+	}
 
-		var result struct {
-			Expert    string `json:"expert"`
-			Reasoning string `json:"reasoning"`
-		}
+	return nil
+}
 
-		opts := &ChatJSONOptions{
-			Model:       ModelMini,
-			Temperature: 0.3,
-		}
-		if err := chatJSON(ctx, systemPrompt, message, opts, &result); err != nil {
-			// Fallback to default expert on routing failure
-			if defaultExpert != "" {
-				logger.Warn("routing failed, using default expert",
-					slog.String("error", err.Error()),
-					slog.String("default_expert", string(defaultExpert)),
-				)
-				return &RouteResult{
-					Expert:     defaultExpert,
-					ExpertName: getExpertName(experts, defaultExpert),
-					Reasoning:  defaultReasoning,
-				}, nil
+// RouteWithScore finds the best skill and returns a confidence score.
+func (r *Router) RouteWithScore(message string) (*Skill, float64) {
+	matches := r.skills.Match(message)
+
+	if len(matches) == 0 {
+		if r.defaultSkillID != "" {
+			if skill, ok := r.skills.Get(r.defaultSkillID); ok {
+				return skill, 0.1 // Low confidence for default
 			}
-			return nil, fmt.Errorf("failed to route question: %w", err)
 		}
-
-		expertType := ExpertType(result.Expert)
-		expertName := getExpertName(experts, expertType)
-
-		logger.Debug("routed question to expert",
-			slog.String("expert_type", string(expertType)),
-			slog.String("expert_name", expertName),
-			slog.String("reasoning", result.Reasoning),
-		)
-
-		return &RouteResult{
-			Expert:     expertType,
-			ExpertName: expertName,
-			Reasoning:  result.Reasoning,
-		}, nil
+		return nil, 0
 	}
+
+	// Calculate score based on trigger matches
+	messageLower := strings.ToLower(message)
+	bestSkill := matches[0]
+	bestScore := calculateScore(bestSkill, messageLower)
+
+	for _, skill := range matches[1:] {
+		score := calculateScore(skill, messageLower)
+		if score > bestScore {
+			bestSkill = skill
+			bestScore = score
+		}
+	}
+
+	return bestSkill, bestScore
 }
 
-func buildExpertsDefinition(experts map[ExpertType]Expert) string {
-	if len(experts) == 0 {
-		return "No experts defined."
+// calculateScore calculates a match score for a skill.
+func calculateScore(skill *Skill, messageLower string) float64 {
+	var score float64
+	words := strings.Fields(messageLower)
+	totalWords := float64(len(words))
+	if totalWords == 0 {
+		return 0
 	}
 
-	// Sort keys for deterministic output
-	keys := make([]ExpertType, 0, len(experts))
-	for k := range experts {
-		keys = append(keys, k)
+	// Count trigger matches
+	triggerMatches := 0
+	for _, trigger := range skill.Triggers {
+		triggerLower := strings.ToLower(trigger)
+		for _, word := range words {
+			if word == triggerLower || strings.Contains(word, triggerLower) {
+				triggerMatches++
+			}
+		}
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		return string(keys[i]) < string(keys[j])
-	})
 
-	var sb strings.Builder
-	for _, expertType := range keys {
-		expert := experts[expertType]
-		sb.WriteString(fmt.Sprintf("- \"%s\" - %s: %s\n", expertType, expert.Name, expert.Description))
+	// Count intent matches
+	intentMatches := 0
+	for _, intent := range skill.Intents {
+		intentLower := strings.ToLower(intent)
+		for _, word := range words {
+			if word == intentLower || strings.Contains(word, intentLower) {
+				intentMatches++
+			}
+		}
 	}
-	return sb.String()
-}
 
-func getExpertName(experts map[ExpertType]Expert, expertType ExpertType) string {
-	if expert, exists := experts[expertType]; exists {
-		return expert.Name
+	// Weight triggers higher than intents
+	score = (float64(triggerMatches)*2 + float64(intentMatches)) / totalWords
+
+	// Normalize to 0-1 range
+	if score > 1 {
+		score = 1
 	}
-	return string(expertType)
+
+	return score
 }

@@ -1,12 +1,10 @@
 module github.com/ourstudio-se/ai-chat-sdk
 
-go 1.25
+go 1.25.3
 
 require (
-	github.com/go-chi/chi/v5 v5.2.4
-	github.com/go-chi/cors v1.2.2
 	github.com/google/uuid v1.6.0
-	github.com/sashabaranov/go-openai v1.41.2
+	gopkg.in/yaml.v3 v3.0.1
 )
 
-require golang.org/x/time v0.14.0 // indirect
+require github.com/sashabaranov/go-openai v1.41.2

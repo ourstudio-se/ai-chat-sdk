@@ -2,261 +2,294 @@ package aichat
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-// ExpertType identifies an expert category.
-type ExpertType string
-
-// ModelTier represents the tier of OpenAI model to use.
-type ModelTier string
+// ExecutionMode determines how the SDK processes requests.
+type ExecutionMode string
 
 const (
-	ModelNano      ModelTier = "nano"
-	ModelMini      ModelTier = "mini"
-	ModelStandard  ModelTier = "standard"
-	ModelReasoning ModelTier = "reasoning"
+	// ModeExpert uses deterministic data fetching with a single LLM call.
+	// The Expert's Fetcher function controls what data is fetched.
+	ModeExpert ExecutionMode = "expert"
+
+	// ModeAgentic lets the LLM decide which tools to call via function calling.
+	// Multiple LLM calls may occur as the agent reasons about what data to fetch.
+	ModeAgentic ExecutionMode = "agentic"
 )
-
-// ChatOptions contains optional parameters for chat completions.
-type ChatOptions struct {
-	Model       ModelTier
-	Temperature float32
-	MaxTokens   int
-}
-
-// ChatJSONOptions contains optional parameters for JSON chat completions.
-type ChatJSONOptions struct {
-	Model       ModelTier
-	Temperature float32
-	MaxTokens   int
-}
-
-// ChatFn performs a chat completion and returns the response string.
-type ChatFn func(ctx context.Context, systemPrompt, userMessage string, opts *ChatOptions) (string, error)
-
-// ChatJSONFn performs a chat completion with JSON mode and unmarshals into result.
-type ChatJSONFn func(ctx context.Context, systemPrompt, userMessage string, opts *ChatJSONOptions, result any) error
-
-// ChatStreamFn performs a streaming chat completion and calls the callback for each token.
-type ChatStreamFn func(ctx context.Context, systemPrompt, userMessage string, opts *ChatOptions, onToken func(token string)) (string, error)
-
-// TranslationResult contains the result of a translation.
-type TranslationResult struct {
-	TranslatedMessage string  `json:"translatedMessage"`
-	DetectedLanguage  string  `json:"detectedLanguage"`
-	Confidence        float64 `json:"confidence"`
-}
-
-// TranslateFn translates a message and detects its language.
-type TranslateFn func(ctx context.Context, message string) (*TranslationResult, error)
-
-// RouteResult contains the routing decision.
-type RouteResult struct {
-	Expert     ExpertType
-	ExpertName string
-	Reasoning  string
-}
-
-// RouteQuestionFn routes a question to the appropriate expert.
-type RouteQuestionFn func(ctx context.Context, message string, entityID string) (*RouteResult, error)
-
-// ExpertRequest is passed to expert handlers.
-// Experts are responsible for resolving any entity data they need using EntityID.
-type ExpertRequest struct {
-	Message          string
-	EntityID         string
-	RoutingReasoning string
-	Data             any // Structured data passed from the request
-}
-
-// ExpertResult is returned by expert handlers.
-type ExpertResult struct {
-	ExpertType ExpertType `json:"expertType"`
-	ExpertName string     `json:"expertName"`
-	Answer     string     `json:"answer"`
-	Reasoning  string     `json:"reasoning,omitempty"`
-	Details    any        `json:"details,omitempty"`
-}
-
-// GetDetails extracts the Details field from an ExpertResult as the specified type T.
-// This provides type-safe access to expert-specific details that consumers define.
-//
-// Example:
-//
-//	type ProductDetails struct {
-//	    ProductID string  `json:"productId"`
-//	    Product   Product `json:"product"`
-//	}
-//
-//	details, err := aichat.GetDetails[ProductDetails](result.ExpertResult)
-//	if err == nil {
-//	    fmt.Println(details.Product.Name)  // Full type safety!
-//	}
-func GetDetails[T any](result *ExpertResult) (T, error) {
-	var zero T
-	if result == nil {
-		return zero, errors.New("expert result is nil")
-	}
-	if result.Details == nil {
-		return zero, errors.New("details is nil")
-	}
-	details, ok := result.Details.(T)
-	if !ok {
-		return zero, fmt.Errorf("details type mismatch: expected %T, got %T", zero, result.Details)
-	}
-	return details, nil
-}
-
-// HandleQuestionFn handles an expert question.
-type HandleQuestionFn func(ctx context.Context, req ExpertRequest) (*ExpertResult, error)
-
-// HandleQuestionStreamFn handles an expert question with streaming support.
-// The stream callback should be called with EventContent events for each token/chunk.
-type HandleQuestionStreamFn func(ctx context.Context, req ExpertRequest, stream StreamCallback) (*ExpertResult, error)
-
-// Expert combines expert metadata with its handler.
-type Expert struct {
-	// Name is the display name of the expert.
-	Name string
-
-	// Description is used by the LLM to determine when to route to this expert.
-	Description string
-
-	// Handler processes questions for this expert.
-	Handler HandleQuestionFn
-
-	// StreamHandler processes questions with streaming support.
-	// If nil, Handler will be used and content sent in one chunk.
-	StreamHandler HandleQuestionStreamFn
-}
-
-// FormatRequest represents a formatting request.
-type FormatRequest struct {
-	ExpertType         ExpertType
-	Answer             string
-	OriginalQuestion   string
-	TranslatedQuestion string
-	DetectedLanguage   string
-}
-
-// FormatResponse represents a formatted response.
-type FormatResponse struct {
-	FormattedAnswer string
-	Language        string
-}
-
-// FormatResponseFn formats an expert answer for the user.
-type FormatResponseFn func(ctx context.Context, req FormatRequest) (*FormatResponse, error)
 
 // ChatRequest represents an incoming chat message.
 type ChatRequest struct {
+	// Message is the user's question or input.
+	Message string `json:"message"`
+
+	// ConversationID links this message to an existing conversation.
+	// If empty, a new conversation is created.
 	ConversationID string `json:"conversationId,omitempty"`
-	Message        string `json:"message"`
-	EntityID       string `json:"entityId,omitempty"`
-	Data           any    `json:"data,omitempty"` // Structured data for experts
+
+	// EntityID is an optional identifier for the entity being discussed
+	// (e.g., product ID, user ID). Used for data fetching.
+	EntityID string `json:"entityId,omitempty"`
+
+	// Context contains additional context from the app layer
+	// (e.g., market, locale, productId, userId).
+	Context RequestContext `json:"context,omitempty"`
+
+	// Mode overrides the SDK's default execution mode for this request.
+	Mode ExecutionMode `json:"mode,omitempty"`
+
+	// SkillID forces routing to a specific skill (bypasses router).
+	SkillID string `json:"skillId,omitempty"`
+
+	// Variant forces a specific A/B test variant.
+	Variant string `json:"variant,omitempty"`
 }
 
-// ChatResult is the processed chat result.
+// RequestContext holds contextual information from the app layer.
+type RequestContext map[string]any
+
+// String returns a string value from context with a default.
+func (c RequestContext) String(key, defaultValue string) string {
+	if c == nil {
+		return defaultValue
+	}
+	if v, ok := c[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return defaultValue
+}
+
+// Int returns an int value from context with a default.
+func (c RequestContext) Int(key string, defaultValue int) int {
+	if c == nil {
+		return defaultValue
+	}
+	if v, ok := c[key]; ok {
+		switch n := v.(type) {
+		case int:
+			return n
+		case int64:
+			return int(n)
+		case float64:
+			return int(n)
+		}
+	}
+	return defaultValue
+}
+
+// Bool returns a bool value from context with a default.
+func (c RequestContext) Bool(key string, defaultValue bool) bool {
+	if c == nil {
+		return defaultValue
+	}
+	if v, ok := c[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return defaultValue
+}
+
+// ChatResult is the response from processing a chat request.
 type ChatResult struct {
-	ConversationID string        `json:"conversationId"`
-	ExpertResult   *ExpertResult `json:"expertResult"`
+	// ConversationID identifies the conversation.
+	ConversationID string `json:"conversationId"`
+
+	// MessageID uniquely identifies this response message.
+	MessageID string `json:"messageId"`
+
+	// SkillID is the skill that handled the request.
+	SkillID string `json:"skillId"`
+
+	// Variant is the A/B test variant used.
+	Variant string `json:"variant,omitempty"`
+
+	// Mode is the execution mode used.
+	Mode ExecutionMode `json:"mode"`
+
+	// ToolCalls lists the tools that were called during processing.
+	ToolCalls []ToolCall `json:"toolsCalled,omitempty"`
+
+	// Response is the typed JSON response matching the skill's output schema.
+	Response json.RawMessage `json:"response"`
+
+	// SuggestedAction is an optional action suggested by the LLM
+	// (expert mode only - not executed, just suggested).
+	SuggestedAction *SuggestedAction `json:"suggestedAction,omitempty"`
+
+	// TokensUsed is the total tokens consumed.
+	TokensUsed TokenUsage `json:"tokensUsed,omitempty"`
+
+	// Duration is how long processing took.
+	Duration time.Duration `json:"duration,omitempty"`
 }
 
-// ProcessChatFn processes a complete chat request.
-type ProcessChatFn func(ctx context.Context, req ChatRequest) (*ChatResult, error)
+// ToolCall represents a tool invocation during processing.
+type ToolCall struct {
+	// Name is the tool that was called.
+	Name string `json:"name"`
 
-// StreamCallback is called to send streaming events to the client.
-type StreamCallback func(event StreamEvent)
+	// Params are the parameters passed to the tool.
+	Params map[string]any `json:"params,omitempty"`
 
-// ProcessChatStreamFn processes a chat request with streaming support.
-type ProcessChatStreamFn func(ctx context.Context, req ChatRequest, stream StreamCallback) (*ChatResult, error)
+	// Duration is how long the tool call took.
+	Duration time.Duration `json:"duration,omitempty"`
+}
 
-// DispatchQuestionFn routes and processes a question with the appropriate expert.
-type DispatchQuestionFn func(ctx context.Context, req ExpertRequest) (*ExpertResult, error)
+// SuggestedAction represents an action the LLM wants to perform.
+// In expert mode, actions are suggested but not executed.
+type SuggestedAction struct {
+	// Tool is the action tool to execute.
+	Tool string `json:"tool"`
 
-// DispatchQuestionStreamFn routes and processes a question with streaming support.
-type DispatchQuestionStreamFn func(ctx context.Context, req ExpertRequest, stream StreamCallback) (*ExpertResult, error)
+	// Params are the parameters for the action.
+	Params map[string]any `json:"params"`
 
-// MessageRole represents the role of a message sender.
-type MessageRole string
+	// Reason explains why this action is suggested.
+	Reason string `json:"reason,omitempty"`
+}
 
-const (
-	RoleUser      MessageRole = "user"
-	RoleAssistant MessageRole = "assistant"
-)
+// TokenUsage tracks token consumption.
+type TokenUsage struct {
+	// PromptTokens is the tokens used in the prompt.
+	PromptTokens int `json:"promptTokens"`
 
-// Message represents a single message in a conversation.
+	// CompletionTokens is the tokens in the response.
+	CompletionTokens int `json:"completionTokens"`
+
+	// TotalTokens is the sum of prompt and completion tokens.
+	TotalTokens int `json:"totalTokens"`
+}
+
+// SkillRequest is used when executing a skill directly (e.g., from an Expert).
+type SkillRequest struct {
+	// Message is the user's question.
+	Message string
+
+	// Data is custom data to include in the prompt (provided by Expert.Fetcher).
+	Data any
+
+	// Context is additional context from the request.
+	Context RequestContext
+
+	// Variant forces a specific A/B test variant.
+	Variant string
+
+	// ConversationID for conversation history context.
+	ConversationID string
+}
+
+// SkillResult is the result of executing a skill.
+type SkillResult struct {
+	// Response is the typed JSON response.
+	Response json.RawMessage
+
+	// Variant is the variant that was used.
+	Variant string
+
+	// TokensUsed tracks token consumption.
+	TokensUsed TokenUsage
+}
+
+// Message represents a message in a conversation.
 type Message struct {
-	Role      MessageRole `json:"role"`
-	Content   string      `json:"content"`
-	Timestamp time.Time   `json:"timestamp"`
-	Expert    *string     `json:"expert,omitempty"`
-	Data      any         `json:"data,omitempty"`
-}
+	// ID uniquely identifies the message.
+	ID string `json:"id"`
 
-// Conversation represents a conversation between a user and the assistant.
-type Conversation struct {
-	ID        string    `json:"id"`
+	// ConversationID links the message to a conversation.
+	ConversationID string `json:"conversationId"`
+
+	// Role is "user" or "assistant".
+	Role string `json:"role"`
+
+	// Content is the message content.
+	Content string `json:"content"`
+
+	// SkillID is the skill that generated assistant messages.
+	SkillID string `json:"skillId,omitempty"`
+
+	// Variant is the A/B test variant used.
+	Variant string `json:"variant,omitempty"`
+
+	// Metadata holds additional message data.
+	Metadata map[string]any `json:"metadata,omitempty"`
+
+	// CreatedAt is when the message was created.
 	CreatedAt time.Time `json:"createdAt"`
-	EntityID  string    `json:"entityId,omitempty"`
-	Messages  []Message `json:"messages"`
 }
 
-// AddMessage appends a message to the conversation.
-func AddMessage(c *Conversation, msg Message) {
-	c.Messages = append(c.Messages, msg)
+// Conversation represents a chat conversation.
+type Conversation struct {
+	// ID uniquely identifies the conversation.
+	ID string `json:"id"`
+
+	// EntityID is the entity being discussed.
+	EntityID string `json:"entityId,omitempty"`
+
+	// Context is conversation-level context.
+	Context RequestContext `json:"context,omitempty"`
+
+	// Messages are the messages in the conversation.
+	Messages []Message `json:"messages"`
+
+	// CreatedAt is when the conversation started.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// UpdatedAt is when the conversation was last updated.
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// ConversationStore is a struct of functions for conversation persistence.
-type ConversationStore struct {
-	Create     func(ctx context.Context, entityID string) (*Conversation, error)
-	Get        func(ctx context.Context, id string) (*Conversation, error)
-	AddMessage func(ctx context.Context, id string, msg Message) error
-	Save       func(ctx context.Context, conversation *Conversation) error
+// Feedback represents user feedback on a message.
+type Feedback struct {
+	// MessageID is the message being rated.
+	MessageID string `json:"messageId"`
+
+	// Rating is the feedback score (e.g., 1-5 or thumbs up/down).
+	Rating int `json:"rating"`
+
+	// Comment is optional feedback text.
+	Comment string `json:"comment,omitempty"`
+
+	// CreatedAt is when feedback was submitted.
+	CreatedAt time.Time `json:"createdAt"`
 }
 
-// StreamEventType represents the type of server-sent event.
-type StreamEventType string
-
-const (
-	EventThinking    StreamEventType = "thinking"
-	EventTranslating StreamEventType = "translating"
-	EventRouting     StreamEventType = "routing"
-	EventProcessing  StreamEventType = "processing"
-	EventContent     StreamEventType = "content"
-	EventDone        StreamEventType = "done"
-	EventError       StreamEventType = "error"
-)
-
-// StreamEvent represents a server-sent event for streaming responses.
-type StreamEvent struct {
-	Type           StreamEventType `json:"type"`
-	ConversationID *string         `json:"conversationId,omitempty"`
-	Expert         *ExpertType     `json:"expert,omitempty"`
-	ExpertName     *string         `json:"expertName,omitempty"`
-	Content        *string         `json:"content,omitempty"`
-	MessageID      *string         `json:"messageId,omitempty"`
-	Data           any             `json:"data,omitempty"` // Structured data from expert
+// NewConversationID generates a new conversation ID.
+func NewConversationID() string {
+	return uuid.New().String()
 }
 
-// HTTPChatRequest represents the HTTP request body for chat endpoints.
-type HTTPChatRequest struct {
-	Message        string  `json:"message"`
-	ConversationID *string `json:"conversationId,omitempty"`
-	EntityID       *string `json:"entityId,omitempty"`
-	Data           any     `json:"data,omitempty"` // Structured data for experts
+// NewMessageID generates a new message ID.
+func NewMessageID() string {
+	return uuid.New().String()
 }
 
-// HTTPChatResponse represents the HTTP response body for chat endpoints.
-type HTTPChatResponse struct {
-	ConversationID string     `json:"conversationId"`
-	Expert         ExpertType `json:"expert"`
-	ExpertName     string     `json:"expertName"`
-	Message        string     `json:"message"`
-	Reasoning      string     `json:"reasoning"`
-	Response       string     `json:"response"`
-	Data           any        `json:"data,omitempty"` // Structured data from expert
+// GetResponse extracts a typed response from a ChatResult.
+// It unmarshals the JSON response into the provided type T.
+func GetResponse[T any](result ChatResult) (T, error) {
+	var response T
+	if err := json.Unmarshal(result.Response, &response); err != nil {
+		return response, NewSDKError(ErrCodeValidation, "failed to unmarshal response", err)
+	}
+	return response, nil
+}
+
+// GetSkillResponse extracts a typed response from a SkillResult.
+func GetSkillResponse[T any](result SkillResult) (T, error) {
+	var response T
+	if err := json.Unmarshal(result.Response, &response); err != nil {
+		return response, NewSDKError(ErrCodeValidation, "failed to unmarshal response", err)
+	}
+	return response, nil
+}
+
+// ToolExecutor allows Expert fetchers to execute registered tools.
+type ToolExecutor interface {
+	// Execute runs a tool by name with the given parameters.
+	Execute(ctx context.Context, toolName string, params map[string]any) (any, error)
 }
